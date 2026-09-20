@@ -48,3 +48,4 @@ python-dotenv
 tiktoken
 openai
 scikit-learn
+whitenoise
