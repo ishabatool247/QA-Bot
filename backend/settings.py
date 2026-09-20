@@ -30,11 +30,10 @@ SECRET_KEY = os.getenv(
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
-    "qa-bot-dssk.onrender.com",
+    "qa-bot-1-yrkh.onrender.com",
     "localhost",
     "127.0.0.1",
 ]
-
 
 # --------------------------------------------------
 # Applications
