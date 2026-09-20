@@ -1,11 +1,13 @@
+
 from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 # --------------------------------------------------
@@ -15,7 +17,6 @@ from langchain_groq import ChatGroq
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 PDF_PATH = BASE_DIR / "data" / "LangChain_Mastery_Guide.pdf"
-CHROMA_PATH = BASE_DIR / "chroma_db"
 
 
 # --------------------------------------------------
@@ -46,49 +47,66 @@ docs = splitter.split_documents(documents)
 
 
 # --------------------------------------------------
-# Embedding model
+# Lightweight TF-IDF Search
 # --------------------------------------------------
 
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
+texts = [doc.page_content for doc in docs]
+
+vectorizer = TfidfVectorizer(
+    stop_words="english"
 )
 
-
-# --------------------------------------------------
-# Vector database
-# --------------------------------------------------
-
-if CHROMA_PATH.exists() and any(CHROMA_PATH.iterdir()):
-    db = Chroma(
-        persist_directory=str(CHROMA_PATH),
-        embedding_function=embeddings
-    )
-else:
-    db = Chroma.from_documents(
-        documents=docs,
-        embedding=embeddings,
-        persist_directory=str(CHROMA_PATH)
-    )
+document_vectors = vectorizer.fit_transform(texts)
 
 
 # --------------------------------------------------
-# OpenAI model
+# Groq Model
 # --------------------------------------------------
+
 llm = ChatGroq(
     model="openai/gpt-oss-20b",
     temperature=0
 )
+
+
 # --------------------------------------------------
 # QA Function
 # --------------------------------------------------
 
 def ask_question(question):
-    results = db.similarity_search(question, k=3)
 
+    # Convert question into TF-IDF vector
+    question_vector = vectorizer.transform([question])
+
+    # Calculate similarity with all document chunks
+    similarities = cosine_similarity(
+        question_vector,
+        document_vectors
+    ).flatten()
+
+    # Get top 3 relevant chunks
+    top_indices = similarities.argsort()[-3:][::-1]
+
+    results = [
+        docs[index]
+        for index in top_indices
+        if similarities[index] > 0
+    ]
+
+    # No relevant information found
+    if not results:
+        return (
+            "The information is not available "
+            "in the provided document."
+        )
+
+    # Build context
     context = "\n\n".join(
-        [doc.page_content for doc in results]
+        doc.page_content
+        for doc in results
     )
 
+    # Prompt
     prompt = f"""
 Use only the context below to answer the question.
 
@@ -107,3 +125,4 @@ Answer:
     response = llm.invoke(prompt)
 
     return response.content
+
