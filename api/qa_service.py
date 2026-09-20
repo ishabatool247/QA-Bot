@@ -1,11 +1,10 @@
 
 from pathlib import Path
+import re
 
 from dotenv import load_dotenv
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_groq import ChatGroq
-
+from pypdf import PdfReader
+from groq import Groq
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -30,42 +29,75 @@ load_dotenv(BASE_DIR / ".env")
 # Load PDF
 # --------------------------------------------------
 
-loader = PyPDFLoader(str(PDF_PATH))
-documents = loader.load()
+def load_pdf_text():
+    reader = PdfReader(str(PDF_PATH))
+
+    pages = []
+
+    for page in reader.pages:
+        text = page.extract_text() or ""
+
+        if text.strip():
+            pages.append(text)
+
+    return "\n".join(pages)
 
 
 # --------------------------------------------------
 # Split text
 # --------------------------------------------------
 
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=50
-)
+def split_text(text, chunk_size=500, overlap=50):
 
-docs = splitter.split_documents(documents)
+    words = re.split(r"\s+", text.strip())
+
+    chunks = []
+
+    start = 0
+
+    while start < len(words):
+
+        end = min(start + chunk_size, len(words))
+
+        chunk = " ".join(words[start:end])
+
+        if chunk.strip():
+            chunks.append(chunk)
+
+        if end >= len(words):
+            break
+
+        start = end - overlap
+
+    return chunks
 
 
 # --------------------------------------------------
-# Lightweight TF-IDF Search
+# Prepare Knowledge Base
 # --------------------------------------------------
 
-texts = [doc.page_content for doc in docs]
+pdf_text = load_pdf_text()
+
+docs = split_text(pdf_text)
+
+
+# --------------------------------------------------
+# TF-IDF Search
+# --------------------------------------------------
 
 vectorizer = TfidfVectorizer(
     stop_words="english"
 )
 
-document_vectors = vectorizer.fit_transform(texts)
+document_vectors = vectorizer.fit_transform(docs)
 
 
 # --------------------------------------------------
-# Groq Model
+# Groq Client
 # --------------------------------------------------
 
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    temperature=0
+client = Groq(
+    api_key=None
 )
 
 
@@ -75,16 +107,13 @@ llm = ChatGroq(
 
 def ask_question(question):
 
-    # Convert question into TF-IDF vector
     question_vector = vectorizer.transform([question])
 
-    # Calculate similarity with all document chunks
     similarities = cosine_similarity(
         question_vector,
         document_vectors
     ).flatten()
 
-    # Get top 3 relevant chunks
     top_indices = similarities.argsort()[-3:][::-1]
 
     results = [
@@ -93,20 +122,14 @@ def ask_question(question):
         if similarities[index] > 0
     ]
 
-    # No relevant information found
     if not results:
         return (
             "The information is not available "
             "in the provided document."
         )
 
-    # Build context
-    context = "\n\n".join(
-        doc.page_content
-        for doc in results
-    )
+    context = "\n\n".join(results)
 
-    # Prompt
     prompt = f"""
 Use only the context below to answer the question.
 
@@ -122,7 +145,15 @@ Question:
 Answer:
 """
 
-    response = llm.invoke(prompt)
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0
+    )
 
-    return response.content
-
+    return response.choices[0].message.content

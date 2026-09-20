@@ -49,3 +49,16 @@ tiktoken
 openai
 scikit-learn
 whitenoise
+
+Django
+djangorestframework
+django-cors-headers
+gunicorn
+whitenoise
+
+pypdf
+python-dotenv
+groq
+scikit-learn
+
+
